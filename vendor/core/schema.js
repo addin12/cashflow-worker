@@ -1,7 +1,6 @@
 // Layout of the tabs the app owns, and the fixed coordinates of the template.
 // Everything that touches a cell address goes through this file.
 
-export const SETUP_VERSION = 43; // 10: formulas under en_US · 11: Goals tab, move_to_opening · 12: unmerge the ledger area · 13: salary, seed config · 14: every-minute sync trigger · 15: balance_checks, big_amount · 16: imports · 17: Tagih, Rutin, Aset tabs · 18: Aset.price_at · 19: price_status · 20: notes by email, tag budgets, close the day, bill reminders · 21: paydays before weekends/holidays, cards, yearly plans, calendar · 22: phone notifications · 23: partner · 24: a partner with several Google accounts · 25: owner_email · 26: warranty dates, insurance claims, yearly plans looked for again · 27: the partner's own settings · 28: shared costs, Telegram · 29: data fixes can add accounts and fill rows' accounts · 30: setup shares the spreadsheet with everyone listed · 31: hints as text, rules applied to waiting rows · 32: leftover Cashflow calendars removed · 33: the same, matched by their events too · 34: the calendar made again after it was deleted by hand · 35: the same, once more · 36, 37: the account the calendar is made under is recorded · 38 to 42: each person's sync tidies their own calendar; triggers know who is running (no cache, no Session), the calendar tidied for both people · 43: budgets per person (Budgets gets a scope column)
 
 export const TABS = {
   transactions: 'Transactions',
@@ -126,9 +125,6 @@ for (const key of PERSONAL_KEYS) {
 CONFIG_KEYS.push(
   { key: 'shared_split', name: 'CFG_SHARED_SPLIT', note: 'Shared costs (#bersama): the first person\'s part in percent (default 50; the rest is the partner\'s)' },
   { key: 'settlements', name: 'CFG_SETTLEMENTS', note: 'Settle-ups between the two of you (JSON, written by the app)' },
-  { key: 'telegram_chats', name: 'CFG_TELEGRAM_CHATS', note: 'Telegram chats that may log transactions (JSON, written by the app; the bot token is not here)' },
-  { key: 'telegram_nonce', name: 'CFG_TELEGRAM_NONCE', note: 'One-time code for linking a Telegram chat (written by the app)' },
-  { key: 'telegram_username', name: 'CFG_TELEGRAM_USERNAME', note: 'The Telegram bot\'s username (written by the app)' },
 );
 
 // Added in setup version 43: always at the very END. Each setting is found by its place in this list (row = index + 2), so a key
