@@ -32,7 +32,6 @@ import { answerQuestion, parseQuestion, sanitizeParsed } from './ask.js';
 import { netWorth, assetProblems, ASSET_KINDS, duePlans, owedSummary, upcomingBills, financialHealth, warrantyEnds, parsePriceStatus } from './wealth.js';
 import { markClaim, openClaims, CLAIM_STATUSES, DEFAULT_CLAIM_DAYS } from './claims.js';
 import { sharedBalance } from './shared.js';
-import { validToken, makeNonce, parseNonce, unlinkOwner } from './telegram.js';
 import { cardBills, cardProblems } from './cards.js';
 import { sptList } from './spt.js';
 import { yearlyItems, YEARLY_WORDS } from './yearly.js';
@@ -173,13 +172,6 @@ export function createApi(store, env) {
     const people = members();
     if (people.length < 2) return null;
     return sharedBalance({ rows: rows(), people, pct: Number(store.config('shared_split')) || 50, settlements: list('settlements'), range });
-  };
-  const telegramCode = () => {
-    const n = parseNonce(store.config('telegram_nonce'));
-    if (n && n.name === owner() && now().getTime() - n.at < 20 * 60000) return n.code;
-    const fresh = env.telegram.token();
-    store.setConfig('telegram_nonce', makeNonce(fresh, now().getTime(), owner()));
-    return fresh;
   };
   const claimDays = () => Math.min(365, Math.max(1, Number(store.config('claim_days')) || DEFAULT_CLAIM_DAYS));
   const salaryStream = () => String(store.config(mine('salary_stream')) || '');
@@ -659,30 +651,6 @@ export function createApi(store, env) {
       return { ok: true, renamed: Object.keys(renames).length };
     },
 
-    /** The bot's token from BotFather: checked with Telegram, kept out of the sheet. */
-    saveTelegramToken({ token }) {
-      if (!env.telegram) throw new Error('Telegram is not available here');
-      const t = String(token || '').trim();
-      if (!validToken(t)) throw new Error('that does not look like a bot token (it looks like 123456:ABC…)');
-      const r = env.telegram.save(t);
-      store.setConfig('telegram_username', r.username);
-      return { ok: true, username: r.username };
-    },
-
-    /** Your chat stops logging (the bot and the other person's chat stay). */
-    telegramUnlink() {
-      store.setConfig('telegram_chats', JSON.stringify(unlinkOwner(list('telegram_chats'), owner())));
-      return { ok: true };
-    },
-
-    /** The bot goes away for both of you. */
-    telegramRemove() {
-      if (!env.telegram) throw new Error('Telegram is not available here');
-      env.telegram.remove();
-      ['telegram_chats', 'telegram_nonce', 'telegram_username'].forEach((k) => store.setConfig(k, ''));
-      return { ok: true };
-    },
-
     /** "Tandai lunas": the one who owes pays the other (all of it, or `amount`); it counts against what is owed. */
     settleUp({ amount } = {}) {
       const bal = sharedNow(null);
@@ -1052,14 +1020,6 @@ export function createApi(store, env) {
         },
         balances: streamBalances(rows(), accounts(), { year: year(), asOf: isoDate(now()) }), lastChecks: lastChecks(rows()),
         imports: importHistory(), salaryStream: salaryStream(), plans: store.read(TABS.plans), assets: store.read(TABS.assets), assetKinds: ASSET_KINDS, cards: list('cards'),
-        telegram: env.telegram ? (() => {
-          const configured = env.telegram.configured();
-          const username = String(store.config('telegram_username') || '');
-          return {
-            configured, username, link: configured && username ? `https://t.me/${username}?start=${telegramCode()}` : '',
-            chats: list('telegram_chats').map((c) => ({ label: c.label || 'Telegram', owner: c.owner, at: c.at || '', mine: c.owner === owner() })),
-          };
-        })() : null,
         prices: parsePriceStatus(store.config('price_status')),
         yearly: { found: list('yearly_subs').length, at: String(store.config(mine('yearly_scan')) || '') },
         household: {
@@ -1303,5 +1263,5 @@ export const API_METHODS = [
   'saveAccounts', 'saveCategories', 'saveRules', 'saveBudgets', 'saveConfig', 'balanceCheck', 'syncNow', 'split', 'unsplit', 'sendSummary', 'saveGoals',
   'recordSalary', 'skipSalary', 'unskipSalary', 'hideRecurring', 'unhideRecurring', 'balanceCheckAll',
   'yearly', 'importStatement', 'undoImport', 'updateMany', 'tagih', 'owedSet', 'owedRemove', 'savePlans', 'saveAssets', 'markRecurring',
-  'setTagBudget', 'closeDay', 'reopenDay', 'spt', 'saveCards', 'scanYearly', 'pushTest', 'pushForget', 'connectMe', 'markClaim', 'saveHousehold', 'settleUp', 'undoSettlement', 'saveTelegramToken', 'telegramUnlink', 'telegramRemove', 'restoreBackup', 'applyRules', 'dismissEmail', 'linkTransfer', 'convertTopups',
+  'setTagBudget', 'closeDay', 'reopenDay', 'spt', 'saveCards', 'scanYearly', 'pushTest', 'pushForget', 'connectMe', 'markClaim', 'saveHousehold', 'settleUp', 'undoSettlement', 'restoreBackup', 'applyRules', 'dismissEmail', 'linkTransfer', 'convertTopups',
 ];
