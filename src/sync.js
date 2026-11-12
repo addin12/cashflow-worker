@@ -44,7 +44,12 @@ const json = (v, fallback) => { try { return JSON.parse(v || ''); } catch { retu
 const KNOWN_PER_ACCOUNT = 400; // handled ids remembered per account (a few days of mail)
 const STALE_AFTER_MS = 2 * 3600000; // the mail reader has not answered for this long: tell the owner
 const ALERT_EVERY_MS = 12 * 3600000;
-const QUEUED_FOR_MS = 20 * 60000; // an id sent to the queue is not sent again for this long
+const QUEUED_FOR_MS = 20 * 60000;
+// An ordinary minute asks Gmail only about the last half hour, once per account (one short list instead of two long ones: a third of the CPU).
+// The full pass (two days back from the checkpoint, plus the receipts since the start date) runs at the top of every hour, when the readers changed,
+// on the first scan, and whenever the last good scan is more than half an hour old (after an outage), so nothing slips through for more than an hour.
+const QUICK_WINDOW_MS = 30 * 60000;
+const QUICK_IF_OK_WITHIN_MS = 30 * 60000; // an id sent to the queue is not sent again for this long
 
 /**
  * For every account: the ids of mail to read (new ones, oldest first, and logged errors / waiting receipts that are due again).
@@ -70,15 +75,16 @@ export async function scan(db, mail, { now = () => Date.now() } = {}) {
   const hourly = t.getUTCMinutes() === 0;
   const daily = hourly && t.getUTCHours() === 3;
   const changed = cfg.read_signature !== READ_SIGNATURE;
+  const quick = !changed && !hourly && Number(cfg.scan_ok) > 0 && now() - Number(cfg.scan_ok) < QUICK_IF_OK_WITHIN_MS;
   const pending = json(cfg.retry_pending, []);
   for (const id of Object.keys(queued)) if (now() - queued[id] > 3 * QUEUED_FOR_MS) delete queued[id];
   for (const a of accounts) {
     const conn = conns.find((c) => String(c.gmail).toLowerCase() === String(a.gmail).toLowerCase()) || {};
-    const sinceMs = Math.max(startMs, (Number(conn.checkpoint) || 0) - OVERLAP_MS);
+    const sinceMs = quick ? Math.max(startMs, now() - QUICK_WINDOW_MS) : Math.max(startMs, (Number(conn.checkpoint) || 0) - OVERLAP_MS);
     const query = `from:(${SENDERS.join(' OR ')}) after:${Math.floor(sinceMs / 1000)}`;
     let listed;
     try {
-      listed = [...new Set([...(await mail.list(a.who, query, 200)), ...(await mail.list(a.who, backfillQuery(Math.floor(startMs / 1000)), 100))])];
+      listed = quick ? await mail.list(a.who, query, 60) : [...new Set([...(await mail.list(a.who, query, 200)), ...(await mail.list(a.who, backfillQuery(Math.floor(startMs / 1000)), 100))])];
     } catch (e) { notes.push(`${a.who}: ${e.message}`); failed = true; continue; }
     const mine = new Set(known[a.who] || []);
     const unseen = listed.filter((id) => !mine.has(id) && !(queued[id] && now() - queued[id] < QUEUED_FOR_MS));

@@ -22,7 +22,7 @@ export const SENDERS = [
  * What every account's mail was last read with. When it changes (a new sender, or PARSERS_REVISION bumped because a reader now
  * understands mail it used to skip), each account reads its mail again from the start date once.
  */
-export const PARSERS_REVISION = 3; // 1: BRI · 2: BCA cash withdrawal · 3: Grab layouts (tip, mart, food, no payment line)
+export const PARSERS_REVISION = 4; // 1: BRI · 2: BCA cash withdrawal · 3: Grab layouts (tip, mart, food, no payment line) · 4: Livin' transfer with the amount labelled "Nominal"
 export const READ_SIGNATURE = `${SENDERS.join(',')}#${PARSERS_REVISION}`;
 
 /**

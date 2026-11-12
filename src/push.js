@@ -34,7 +34,7 @@ export async function deliver(db, cfg, push, notice, { event = '', only = '' } =
   const gone = new Set(results.filter((r) => r.status === 404 || r.status === 410).map((r) => r.endpoint));
   if (gone.size) { // read the list again: a phone may have joined meanwhile
     const now = (await db.prepare("SELECT value FROM config WHERE key = 'push_devices'").first()) || { value: '[]' };
-    await put(db, 'push_devices', JSON.stringify(list({ push_devices: now.value }, 'push_devices').filter((d) => !gone.has(d.endpoint)))).run();
+    await db.batch([put(db, 'push_devices', JSON.stringify(list({ push_devices: now.value }, 'push_devices').filter((d) => !gone.has(d.endpoint)))), put(db, 'data_stamp', String(Date.now()))]);
   }
   return { sent: results.filter((r) => r.status >= 200 && r.status < 300).length, gone: gone.size };
 }
@@ -47,7 +47,7 @@ export async function acceptDevice(db, raw, code, label, owner, { now = Date.now
   if (!want || !code || !safeEqual(code, want) || now() - Number(at) > 30 * 60000) return false;
   const sub = parseSubscription(raw);
   if (!sub) return false;
-  await db.batch([put(db, 'push_devices', JSON.stringify(addDevice(list(cfg, 'push_devices'), sub, label, new Date(now()).toISOString(), owner))), put(db, 'push_nonce', '')]);
+  await db.batch([put(db, 'push_devices', JSON.stringify(addDevice(list(cfg, 'push_devices'), sub, label, new Date(now()).toISOString(), owner))), put(db, 'push_nonce', ''), put(db, 'data_stamp', String(now()))]);
   return true;
 }
 

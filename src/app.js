@@ -15,6 +15,25 @@ export function cuts(at = new Date(), payday = 28) {
   return { main: iso(new Date(Date.UTC(label.getUTCFullYear(), label.getUTCMonth() - 2, payday))), bills: iso(new Date(now.getTime() - 130 * 86400000)) };
 }
 
+/**
+ * The first day of the rows a request needs. Today's screens use the recent window; a month that is asked for by name needs the rows of that month and of the one
+ * before it (the comparison), a year needs its whole year, and the full transaction list needs everything. Older rows than the window start are folded into the
+ * accounts' opening balances, so the balances stay right whichever window is used.
+ */
+export function cutFor(method, args = {}, part = '', at = new Date(), payday = 28) {
+  const c = cuts(at, payday);
+  if (part === 'bills' || WIDE.has(method)) return c.bills;
+  if (method === 'list' && (Number(args.limit) > 500 || Object.keys(args).some((k) => k !== 'limit'))) return '1970-01-01'; // the whole list (the screen filters it itself)
+  const year = Number(args.year);
+  if ((method === 'yearly' || method === 'spt') && year >= 2000) return `${year - 1}-12-28`;
+  const m = /^(\d{4})-(\d{2})$/.exec(String(args.month || ''));
+  if ((method === 'dashboard' || method === 'monthTotals') && m) {
+    const older = iso(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 3, payday))); // two pay months before the one asked for, as the main window is for today
+    return older < c.main ? older : c.main;
+  }
+  return c.main;
+}
+
 // Methods that look further back than the main window (budget suggestions, recurring bills, the settings screen).
 const WIDE = new Set(['settings', 'saveBudgets', 'saveConfig']);
 // Methods that read the e-mail log (new accounts the mail mentions, unreadable mail).
@@ -22,9 +41,7 @@ const NEEDS_LOG = new Set(['review', 'bootstrap', 'init']);
 
 /** Runs one app method for one request. `args` as the screen sends them; `email` is who Cloudflare Access said is asking (empty in token mode). */
 export async function run(env, method, args, { part, email = '', now = () => jakarta() } = {}) {
-  const c = cuts(now());
-  const wide = WIDE.has(method) || part === 'bills';
-  const unit = await openUnit(env.DB, wide ? c.bills : c.main, { rules: true, inbox: NEEDS_LOG.has(method), now, who: (cfg) => personFor(cfg, email), push: pushOf(env) });
+  const unit = await openUnit(env.DB, cutFor(method, args || {}, part, now()), { rules: true, inbox: NEEDS_LOG.has(method), now, who: (cfg) => personFor(cfg, email), push: pushOf(env) });
   const { result, written } = await unit.call(method, args);
   return { result, written };
 }

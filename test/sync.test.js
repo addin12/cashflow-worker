@@ -92,8 +92,42 @@ describe('scan', () => {
     expect(e1).toHaveLength(mailbox.length);
     const soon = await scan(db, mail, { now: () => NOW.getTime() + 5 * 60000 });
     expect(soon.messages.filter((m) => m.id.startsWith('e'))).toEqual([]);
-    const later = await scan(db, mail, { now: () => NOW.getTime() + 25 * 60000 });
+    // an ordinary minute only looks at the last half hour, so mail from days ago is offered again at the next full pass: the top of the hour
+    const quiet = await scan(db, mail, { now: () => NOW.getTime() + 25 * 60000 });
+    expect(quiet.messages.filter((m) => m.id.startsWith('e'))).toEqual([]);
+    const later = await scan(db, mail, { now: () => NOW.getTime() + 60 * 60000 });
     expect(later.messages.filter((m) => m.id.startsWith('e'))).toHaveLength(mailbox.length); // never read: offered again
+  });
+  it('an ordinary minute asks Gmail one short question per account; the first scan, the top of the hour and a scan after an outage ask the long ones', async () => {
+    const calls = [];
+    const spy = { ...mail, list: async (who, q, max) => { calls.push({ q, max }); return mail.list(who, q, max); } };
+    const after = (q) => Number(/after:(\d+)/.exec(q)[1]);
+    await scan(db, spy, { now: () => NOW.getTime() }); // the first scan: the long pass (two questions)
+    expect(calls).toHaveLength(2);
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 60000 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].max).toBe(60);
+    expect(after(calls[0].q)).toBe(Math.floor((NOW.getTime() + 60000 - 30 * 60000) / 1000));
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 60 * 60000 }); // 04:00
+    expect(calls).toHaveLength(2);
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 61 * 60000 }); // the good scan a minute ago is fresh again
+    expect(calls).toHaveLength(1);
+    db.exec("INSERT OR REPLACE INTO config (key, value) VALUES ('scan_ok', '" + (NOW.getTime() - 3 * 3600000) + "')");
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 62 * 60000 }); // the last good scan was hours ago
+    expect(calls).toHaveLength(2);
+  });
+  it('mail that arrived in the last minutes is found by the short question', async () => {
+    await scan(db, mail, { now: () => NOW.getTime() });
+    const fresh = { who: 'addin', id: 'enewmail0001', from: mailbox[0].from, subject: mailbox[0].subject, epochMs: NOW.getTime() + 2 * 60000, body: mailbox[0].body, isHtml: mailbox[0].isHtml };
+    mailbox.push(fresh);
+    try {
+      const r = await scan(db, mail, { now: () => NOW.getTime() + 3 * 60000 });
+      expect(r.messages.map((m) => m.id)).toEqual(['enewmail0001']);
+    } finally { mailbox.pop(); }
   });
   it('an email that failed to read is offered again (once a day at 10:00 Jakarta, not every minute); one that was skipped is not', async () => {
     const id = mailbox[0].id;

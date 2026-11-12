@@ -1,4 +1,4 @@
-// Livin' by Mandiri (Indonesian, label/value table; payee in a heading under "Penerima").
+// Livin' by Mandiri (Indonesian, label/value table; payee in a heading under "Penerima"). A transfer's amount is "Jumlah Transfer", "Nominal Transfer", or just "Nominal".
 import { parseDateTime, parseTime } from '../money.js';
 import { valueAfter, firstValue, findToken } from '../text.js';
 import { ok, skip, amountOf, feeOf, remark, joinDetails, institutionOf, splitPayee } from './common.js';
@@ -7,7 +7,7 @@ const LABELS = [
   'Penerima', 'Penyedia Jasa', 'Tanggal', 'Jam', 'Nominal Transaksi', 'Biaya Transaksi', 'Total Transaksi',
   'No. Referensi', 'Nomor Referensi', 'No. Ref. QRIS', 'Merchant PAN', 'Customer PAN', 'Pengakuisisi',
   'Terminal ID', 'Sumber Dana', 'Rekening Sumber', 'Jumlah Transfer', 'Nominal Transfer', 'Biaya Transfer',
-  'Tujuan Transaksi', 'No. Referensi BI Fast', 'Keterangan', 'Nominal Top-up',
+  'Tujuan Transaksi', 'No. Referensi BI Fast', 'Keterangan', 'Nominal Top-up', 'Nominal', 'Jumlah',
 ];
 
 /** Account hint: the "****1234" shown under Sumber Dana / Rekening Sumber. */
@@ -56,7 +56,7 @@ export const livin = {
       const payee = splitPayee(...blockAfter(t, 'Penerima'));
       return ok({
         type: 'transfer', direction: 'out', ...when,
-        amount: amountOf(firstValue(t, ['Jumlah Transfer', 'Nominal Transfer'], LABELS, true)), fee: feeOf(get('Biaya Transfer')),
+        amount: amountOf(firstValue(t, ['Jumlah Transfer', 'Nominal Transfer', 'Nominal', 'Jumlah'], LABELS, true)), fee: feeOf(get('Biaya Transfer')),
         account, counterparty: payee, description: payee.name,
         details: joinDetails(remark(get('Keterangan')), /bi ?fast/i.test(m.subject) ? 'BI-FAST' : ''), refNo,
       });

@@ -18,6 +18,16 @@ export const keyOf = (tab, row) => String(row[FIRST_COL[tab] || 'id'] ?? '');
 const FIXED = ['Penyesuaian', 'trf ke bank lain'];
 // Rows kept whatever their age (see loadWindow): waiting ones, #bersama ones (the shared balance runs over all of them) and salary ones (the missing-salary check).
 const SMALL_TABS = [TABS.accounts, TABS.budgets, TABS.goals, TABS.owed, TABS.assets, TABS.plans, TABS.connections];
+// Config keys only the mail scan and the daily jobs use (some of them long lists): the app never reads them, so a request does not load them.
+const INTERNAL_KEYS = ['known_ids', 'queued_ids', 'retry_pending', 'read_signature', 'scan_checked', 'scan_ok', 'scan_alerted', 'daily_done'];
+// What a request loaded is kept for the next one while nothing has changed (this Worker instance only; every write moves Config data_stamp, which is
+// checked first on every request). Without a data_stamp nothing is kept. Entries are the raw rows: each request copies what it changes.
+const windows = new Map();
+const WINDOWS_KEPT = 6;
+export const clearWindowCache = () => windows.clear();
+// Tests switch this on: every transaction row of a unit is then frozen, so any code that changes a row it only read throws instead of silently changing
+// what the next read of the same unit sees. Updates replace a row (below), they never change one in place.
+export const strictRows = { on: false };
 // D1 allows 100 bound values per statement and 50 statements per request: rows are written several to a statement.
 const TX_PER_STATEMENT = 4;
 const TABS_PER_STATEMENT = 30;
@@ -47,9 +57,9 @@ export function periodBounds(label) {
 }
 
 // Every query below uses an index: D1 charges for the rows a query scans, not the rows it returns.
-async function loadWindow(db, cut, { rules, inbox }) {
+async function loadWindow(db, cut) {
   const q = (sql, ...args) => db.prepare(sql).bind(...args);
-  const names = [...SMALL_TABS, ...(rules ? [TABS.rules] : []), ...(inbox ? [TABS.inboxLog] : [])];
+  const names = [...SMALL_TABS, TABS.rules, TABS.inboxLog]; // everything a screen may ask for: the next request, whichever screen, can use it
   const [tx, carry, tabs, cfg, totals, places] = (await db.batch([
     // the window, plus every waiting, #bersama and salary row of any age (each from its own index)
     q(`SELECT ${TX_COLS.join(', ')} FROM transactions WHERE id IN (
@@ -60,7 +70,7 @@ async function loadWindow(db, cut, { rules, inbox }) {
     // what the older months did to each account, from the stored sums (cut is a 28th: the months before its pay month)
     q('SELECT stream, SUM(net) AS net FROM stream_months WHERE month < ?1 GROUP BY stream', period28(cut)),
     tabsQuery(q, names),
-    q('SELECT key, value FROM config'),
+    q(`SELECT key, value FROM config WHERE key NOT IN (${INTERNAL_KEYS.map((k) => `'${k}'`).join(', ')})`),
     q('SELECT owner, month, income, expense FROM monthly_totals'),
     q('SELECT owner, place_key FROM places_seen WHERE first_date < ?1', cut),
   ])).map((r) => r.results);
@@ -90,9 +100,9 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
   const q = (sql, ...args) => db.prepare(sql).bind(...args);
   const cfg = Object.fromEntries(data.cfg.map((r) => [r.key, r.value]));
   const person = typeof who === 'function' ? who(cfg) : who; // the person asking (a function of the household's Config, which can refuse)
-  const t = { [TX]: data.tx.map(clone) };
+  const t = { [TX]: data.tx.map(strictRows.on ? (r) => Object.freeze(clone(r)) : clone) };
   for (const n of data.names) t[n] = [];
-  for (const r of data.tabs) t[r.tab].push(JSON.parse(r.json));
+  for (const r of data.tabs) t[r.tab].push(r.row ? clone(r.row) : JSON.parse(r.json)); // kept windows hold the parsed row (flat: a copy is enough)
   const net = new Map(data.carry.map((r) => [r.stream, r.net]));
   t[TABS.accounts] = t[TABS.accounts].map((a) => ({ ...a, opening_balance: Number(a.opening_balance || 0) + (net.get(a.stream) || 0) }));
   let slots = JSON.parse(cfg._slots || '{"income":[],"expense":[]}');
@@ -106,7 +116,7 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
   const find = (tab, id) => (t[tab] || []).findIndex((r) => keyOf(tab, r) === String(id));
 
   const store = {
-    read: (tab) => (t[tab] || []).map(clone),
+    read: (tab) => (t[tab] || []).slice(), // a new array (callers sort it), the same rows: see strictRows
     append(tab, rows) {
       const added = rows.map(clone);
       (t[tab] ||= []).push(...added);
@@ -117,10 +127,10 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
       for (const { id, changes: patch } of updates) {
         const i = find(tab, id);
         if (i < 0) continue;
-        const before = clone(t[tab][i]);
-        Object.assign(t[tab][i], patch);
-        if (tab === TX) { markDate(before); markDate(t[tab][i]); changes.push({ before, after: clone(t[tab][i]) }); }
-        ops.push({ op: 'put', tab, row: clone(t[tab][i]) });
+        const before = t[tab][i];
+        t[tab][i] = strictRows.on && tab === TX ? Object.freeze({ ...before, ...patch }) : { ...before, ...patch }; // replaced, never changed in place: rows already handed out stay as they were
+        if (tab === TX) { markDate(before); markDate(t[tab][i]); changes.push({ before, after: t[tab][i] }); }
+        ops.push({ op: 'put', tab, row: t[tab][i] });
       }
     },
     remove(tab, id) {
@@ -163,7 +173,7 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
 
   // What one row adds to each pay month's income and expense (the totals are sums, so a change is "minus before, plus after").
   const rowsNow = [];
-  const tinyStore = { read: (tab) => (tab === TX ? rowsNow.map(clone) : (t[tab] || []).map(clone)), append() {}, update() {}, remove() {}, replace() {}, config: store.config, setConfig() {}, slots: store.slots, setSlots() {} };
+  const tinyStore = { read: (tab) => (tab === TX ? rowsNow.slice() : (t[tab] || []).slice()), append() {}, update() {}, remove() {}, replace() {}, config: store.config, setConfig() {}, slots: store.slots, setSlots() {} };
   const tiny = createApi(tinyStore, { now, isOwner: person.owner, meName: person.name, myEmail: person.email });
   const contribution = (row, sign, into) => {
     rowsNow.length = 0; rowsNow.push(row);
@@ -251,6 +261,7 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
       }
       await db.batch(st);
       if (st2.length) await db.batch(st2);
+      windows.clear(); // what was kept is out of date now
       const statements = st.length + st2.length;
       ops.length = 0; changes.length = 0; touched.clear();
       return { statements, months };
@@ -261,9 +272,24 @@ function assemble(db, data, { now, who, totalsMode, push = null }) {
 
 const DEFAULT_WHO = { name: 'Me', email: 'a@example.com', owner: true };
 
+/** The window from `cut` on: the one kept from an earlier request when Config data_stamp has not moved, else loaded now. */
+async function cachedWindow(db, cut) {
+  const row = await db.prepare("SELECT value FROM config WHERE key = 'data_stamp'").first(); // read first: data loaded after it is at least as new
+  const stamp = row && row.value ? String(row.value) : '';
+  const kept = stamp && windows.get(cut);
+  if (kept && kept.stamp === stamp) return kept.data; // a promise: requests that arrive while it is still loading (the page asks six things at once) wait for the same load
+  const load = loadWindow(db, cut).then((data) => ({ ...data, tabs: data.tabs.map((r) => ({ ...r, row: JSON.parse(r.json) })) })); // parsed once, copied by each request
+  if (!stamp) return load;
+  windows.set(cut, { stamp, data: load });
+  while (windows.size > WINDOWS_KEPT) windows.delete(windows.keys().next().value);
+  try { return await load; } catch (e) { if (windows.get(cut) && windows.get(cut).data === load) windows.delete(cut); throw e; } // a failed load is not kept
+}
+
 /** A screen or an API method over the window of recent rows from `cut` on. */
 export async function openUnit(db, cut, { rules = false, inbox = false, now = () => jakarta(), who = DEFAULT_WHO, push = null } = {}) {
-  return assemble(db, await loadWindow(db, alignDown28(cut), { rules, inbox }), { now, who, totalsMode: 'recompute', push });
+  const names = [...SMALL_TABS, ...(rules ? [TABS.rules] : []), ...(inbox ? [TABS.inboxLog] : [])];
+  const data = await cachedWindow(db, alignDown28(cut));
+  return assemble(db, { ...data, names, tabs: data.tabs.filter((r) => names.includes(r.tab)) }, { now, who, totalsMode: 'recompute', push });
 }
 
 /** The sync: only the rows near the given parsed events (and the rows already holding the given email ids). */
