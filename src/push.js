@@ -90,9 +90,17 @@ export const staleNotice = (hours, lang = 'id') => ({
 export async function alertUnread(db, cfg, push, lines) {
   if (!push || !lines.length) return;
   const lang = String(cfg.language || 'id') === 'en' ? 'en' : 'id';
-  await alertOwner(db, push, {
-    title: lang === 'en' ? 'Bank e-mail not understood' : 'Email bank tidak terbaca',
-    body: lines.slice(0, 3).map((l) => `${l.subject || '?'}${l.reason ? ` · ${l.reason}` : ''}`).join('\n'),
-    url: '/cek', tag: 'sync-unread',
-  });
+  const emailsOf = (v) => String(v || '').split(/[,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const title = lang === 'en' ? 'Bank e-mail not understood' : 'Email bank tidak terbaca';
+  const detail = (list) => list.slice(0, 3).map((l) => `${l.subject || '?'}${l.reason ? ` · ${l.reason}` : ''}`).join('\n');
+  if (!cfg.partner_email) { await alertOwner(db, push, { title, body: detail(lines), url: '/cek', tag: 'sync-unread' }); return; } // alone: everything
+  // Two people: each hears the details of their own mailbox only. The owner, who looks after the app, hears that the other mailbox has some, without the subjects.
+  const own = new Set(emailsOf(cfg.owner_email));
+  const ofOwner = lines.filter((l) => own.has(String(l.gmail || '').toLowerCase()));
+  const ofPartner = lines.filter((l) => !own.has(String(l.gmail || '').toLowerCase()));
+  const others = ofPartner.length ? (lang === 'en' ? `${ofPartner.length} e-mail(s) in the other Gmail could not be read` : `${ofPartner.length} email di Gmail lainnya belum terbaca`) : '';
+  if (ofOwner.length || others) await alertOwner(db, push, { title, body: [ofOwner.length ? detail(ofOwner) : '', others].filter(Boolean).join('\n'), url: '/cek', tag: 'sync-unread' });
+  if (ofPartner.length && cfg.partner_name) {
+    try { await deliver(db, cfg, push, { title, body: detail(ofPartner), url: '/cek', tag: 'sync-unread' }, { only: cfg.partner_name }); } catch (e) { /* the app shows the problem on the Cek screen too */ }
+  }
 }

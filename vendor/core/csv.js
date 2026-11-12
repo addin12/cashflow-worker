@@ -3,7 +3,7 @@ import { cmp } from './order.js';
 // comes with the monthly email. A text cell that starts like a formula gets a leading ' so a
 // description such as "=HYPERLINK(...)" can't run when the file is opened. Numbers are left alone.
 
-const FORMULA_START = /^([=+@\t\r]|-(?!\d))/;
+const FORMULA_START = /^(?:[=+@\t\r]|-(?!\d+(?:[.,]\d+)?$))/; // a lone "-" or a "-" in front of anything but a plain number ("-2+3+cmd|...") is text a spreadsheet would run
 
 export function csvCell(v) {
   if (typeof v === 'number') return String(v);

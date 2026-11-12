@@ -8,6 +8,9 @@
 - **Push:** the stored phone addresses are called only if they belong to a browser push service (`allowedEndpoint`); messages are encrypted (RFC 8291) and signed with a key that only the Worker holds (secret `VAPID_PRIVATE_KEY`).
 - **Secrets** live in Cloudflare (Worker secrets), never in the repository; `private/` and `secrets/` are git-ignored.
 
+## Audit of 2026-11-12 (quick profile, source only)
+No critical, high or medium finding. Fixed afterwards: the unreadable-e-mail list, its dismiss action and the owner's phone alert now respect whose mailbox a line belongs to; the CSV guard quotes every text cell that starts with "-" unless it is a plain number; the calendar feed neutralises every line-break character; the Gmail layer validates message ids itself. Still open and outside the source: Access policy and session length, any rate-limit rule on the public Gmail-reader route, bucket privacy, dependency advisories (`npm audit`).
+
 ## Known and accepted
 - API errors return up to 300 characters of the reason, only to the two signed-in people.
 - The Gmail reader (`household-mail`) is reachable on the internet with a long bearer token (`MCP_TOKEN`) and no rate limit. It is read-only. If that token is ever shared or leaked, replace it (`wrangler secret put MCP_TOKEN` there, and `MAIL_TOKEN` here, and the token in the Claude connector).

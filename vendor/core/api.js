@@ -103,6 +103,16 @@ export function createApi(store, env) {
       monthlyTotal: Math.round((r.monthlyTotal + yearly.reduce((t, i) => t + i.amount / 12, 0)) * 100) / 100,
     };
   };
+  /**
+   * The inbox log as one person may see it. With two people in the household each sees only the lines of their own Google accounts (sender, subject and
+   * reason of the other one's unreadable bank e-mails are not shared: the guide promises that neither reads the other's e-mail). Alone, everything.
+   */
+  const ownMailLog = () => {
+    const log = store.read(TABS.inboxLog);
+    if (!store.config('partner_email')) return log;
+    const mineEmails = memberInfo(isOwner() ? 'owner' : 'partner').emails;
+    return log.filter((l) => mineEmails.includes(String(l.gmail || '').toLowerCase()));
+  };
   /** Credit cards and paylater (Config cards): the last bill, what is paid, when it's due. */
   const cards = (all) => cardBills(list('cards'), all, now(), fixedNames()[1]);
   /** The one-time code a phone brings back from the site's /notifikasi page (valid 30 minutes, renewed after 20). */
@@ -268,7 +278,7 @@ export function createApi(store, env) {
 
     review() {
       const all = rows();
-      const r = reviewItems(all, store.read(TABS.inboxLog), { today: now() });
+      const r = reviewItems(all, ownMailLog(), { today: now() });
       return { ...r, pending: withFirst(r.pending, firstIds(all)), salary: salaries(all), day: dayState(all), ruleable: ruleUpdates(all, store.read(TABS.rules)).length, linkable: linkableTransfers(ownRows(all)), topups: topupsByWallet(convertibleTopups(ownRows(all), accounts())) };
     },
 
@@ -313,7 +323,7 @@ export function createApi(store, env) {
 
     /** An email that can't be read and isn't a transaction: its log line becomes "skip", so it is not shown or tried again. */
     dismissEmail({ gmailId }) {
-      const log = store.read(TABS.inboxLog).filter((l) => String(l.gmail_id) === String(gmailId));
+      const log = ownMailLog().filter((l) => String(l.gmail_id) === String(gmailId)); // only your own mailbox's e-mails
       const last = log[log.length - 1];
       if (!last) throw new Error('unknown email');
       store.append(TABS.inboxLog, [{ gmail_id: last.gmail_id, received: last.received, from: last.from, subject: last.subject, status: 'skip', parser: last.parser, reason: `dismissed by ${owner() || 'app'}`, rows: 0, gmail: last.gmail }]);

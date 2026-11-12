@@ -10,7 +10,7 @@ import { openUnit } from './unit.js';
 export const FEED_TAB = 'feed';
 const DAY = 86400000;
 const pad = (n) => String(n).padStart(2, '0');
-const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|[\r\n\v\u0085\u2028\u2029]/g, '\\n');
 const compact = (iso) => iso.replace(/-/g, '');
 
 /** A line folded to 75 octets as RFC 5545 asks (by whole characters: an emoji is never cut in half). */
