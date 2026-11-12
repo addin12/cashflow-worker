@@ -9,6 +9,7 @@ import { dueJobs, runJob } from './daily.js';
 import { personFor } from './identity.js';
 import { mailClient } from './mail.js';
 import { refreshPrices } from './prices.js';
+import { heartbeat } from './heartbeat.js';
 import { acceptDevice, alertOwner, pushOf, staleNotice } from './push.js';
 import { sameSecret } from './secret.js';
 import { processEmail, scan } from './sync.js';
@@ -22,6 +23,28 @@ async function joinDevice(env, who, p) {
   const rows = (await env.DB.prepare("SELECT key, value FROM config WHERE key IN ('owner_name', 'owner_email', 'partner_name', 'partner_email')").all()).results;
   const person = personFor(Object.fromEntries(rows.map((r) => [r.key, r.value])), who.email);
   return acceptDevice(env.DB, p.get('push'), p.get('n'), p.get('label'), person.name);
+}
+
+/**
+ * True when a browser says the request was started by another site (a page that is not this app). The app's own pages send Sec-Fetch-Site: same-origin and
+ * Origin of this host; a page of someone else open in the same browser must not be able to make the signed-in person's browser change their data.
+ * Requests that carry neither header (scripts, tests) are not browsers acting for a signed-in cookie and pass.
+ */
+export function crossSite(request) {
+  const site = request.headers.get('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') return true;
+  const origin = request.headers.get('origin');
+  return Boolean(origin) && origin !== new URL(request.url).origin;
+}
+
+/** Headers every answer carries: nobody may put the app in a frame, no guessing of file types, no referrer, no camera or microphone. */
+export function hardened(res) {
+  const h = new Headers(res.headers);
+  h.set('x-content-type-options', 'nosniff');
+  h.set('referrer-policy', 'no-referrer');
+  h.set('content-security-policy', "frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  h.set('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
 export async function authorized(header, secret) {
@@ -75,6 +98,7 @@ export async function route(request, env) {
     const start = `window.__TAB__=${JSON.stringify(tab)};window.__PUSH__=${JSON.stringify(joined)};window.__INIT__=null;`;
     return new Response((await page.text()).replace('window.__INIT__=null;', () => start), { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
   }
+  if (request.method !== 'GET' && crossSite(request)) return json({ error: 'cross-site request refused' }, 403);
   try {
     const out = await handle(env, request, who);
     return out ? json(out) : json({ error: 'not found' }, 404);
@@ -84,7 +108,7 @@ export async function route(request, env) {
 }
 
 export default {
-  fetch: (request, env) => route(request, env),
+  fetch: async (request, env) => hardened(await route(request, env)),
   /** Every minute: which mail is new? One queue message each. */
   async scheduled(event, env) {
     if (event.cron === PRICE_CRON) { await refreshPrices(env.DB); return; } // its own run, so the fetching never adds to the mail scan's CPU
@@ -92,13 +116,14 @@ export default {
     if (stale) await alertOwner(env.DB, pushOf(env), staleNotice(stale.hours)); // the mail reader has been silent for hours
     messages.push(...(await dueJobs(env.DB, Date.now()))); // the daily jobs, started once a day in their hour (src/daily.js)
     for (let i = 0; i < messages.length; i += 50) await env.SYNC_QUEUE.sendBatch(messages.slice(i, i + 50).map((body) => ({ body })));
+    await heartbeat(env, { ok: !stale }); // the outside watchman (src/heartbeat.js): silence there means this job is not finishing
   },
   /** One email per invocation (max_batch_size 1, max_concurrency 1 in the config: two emails of one transfer never race). */
   async queue(batch, env) {
     const mail = mailClient(env.MAIL, env.MAIL_TOKEN);
     for (const msg of batch.messages) {
       try {
-        if (msg.body.feed || msg.body.job) await runJob(env.DB, msg.body, { push: pushOf(env) });
+        if (msg.body.feed || msg.body.job) await runJob(env.DB, msg.body, { push: pushOf(env), bucket: env.BACKUP });
         else await processEmail(env.DB, mail, msg.body, { push: pushOf(env) });
         msg.ack();
       } catch (e) { msg.retry({ delaySeconds: 60 }); }

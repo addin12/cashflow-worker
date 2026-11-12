@@ -1,15 +1,16 @@
 # Backup and restore
 
-The app's data lives in one D1 database (`cashflow`). Three layers protect it.
+The app's data lives in one D1 database (`cashflow`). Four layers protect it.
 
 1. **D1 Time Travel**: Cloudflare keeps the database's history for **7 days on the free plan** (30 on the paid plan). Any minute in that week can be restored in place.
    - Where are we now: `npx wrangler d1 time-travel info cashflow`
    - Restore to a moment: `npx wrangler d1 time-travel restore cashflow --timestamp=2026-11-12T03:00:00Z` (or `--bookmark=<id>` from `info`).
    - This overwrites the live data with the old state, so take a backup first (layer 2).
-2. **A SQL file on your own computer**: `node scripts/backup.mjs` exports the live database to `private/backup/d1-<date>.sql`, restores that file into a scratch copy and compares it with the live
+2. **A weekly copy in Cloudflare R2** (automatic): every Sunday night (20:00 UTC, Monday 03:00 Jakarta) the Worker writes each table as SQL to the private bucket `cashflow-backup`, `weekly/<date>/<table>.sql`, and keeps the newest 8 weeks (`src/backup.js`). Fetch one table: `npx wrangler r2 object get cashflow-backup/weekly/<date>/transactions.sql --remote --file=transactions.sql` (the dashboard under R2, cashflow-backup, also lists the weeks); there is one file per table (config, transactions, tabs, monthly_totals, stream_months, places_seen). To restore: create a database, run `schema.sql`, then run the six files in any order (`wrangler d1 execute <db> --remote --file=...`), then follow steps 4-6 below.
+3. **A SQL file on your own computer**: `node scripts/backup.mjs` exports the live database to `private/backup/d1-<date>.sql`, restores that file into a scratch copy and compares it with the live
    data (rows of every table, number and total of the transactions, the newest date). It prints "matches the live data" or says what differs. Run it before anything risky and now and then
    (monthly is enough). Copy the file somewhere else too (another drive or cloud storage): it holds your finances and is git-ignored on purpose.
-3. **`/backup.csv`** (signed in): every transaction as a spreadsheet file, readable without any tooling. It is not a full backup (no settings or rules), but it keeps the money records safe.
+4. **`/backup.csv`** (signed in): every transaction as a spreadsheet file, readable without any tooling. It is not a full backup (no settings or rules), but it keeps the money records safe.
 
 ## Restoring from a SQL file (rehearsed on 2026-11-12: 613 transactions, all tables identical)
 

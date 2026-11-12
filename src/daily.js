@@ -3,6 +3,8 @@
 //   feed     09:00 Jakarta  the calendar feeds (src/feed.js)
 //   morning  08:00 Jakarta  planned transactions that are due; phone notifications for bills tomorrow, claims, warranties and payday
 //   evening  21:00 Jakarta  "close the day" nudge, for whoever switched it on
+//   backup   Sunday 20:00 UTC (Monday 03:00 Jakarta)  every table as SQL into the R2 bucket, the newest 8 weeks kept (src/backup.js)
+import { TABLES, backupTable, pruneBackups } from './backup.js';
 import { jakarta } from './clock.js';
 import { isPayday } from '../vendor/core/payday.js';
 import { billsNotice, claimsNotice, closeNotice, paydayNotice, warrantyNotice } from '../vendor/core/push.js';
@@ -15,12 +17,13 @@ export const JOBS = [
   { name: 'feed', hour: 2, messages: [{ feed: 'owner' }, { feed: 'partner' }] },
   { name: 'morning', hour: 1, messages: [{ job: 'plans' }, { job: 'alerts' }] },
   { name: 'evening', hour: 14, messages: [{ job: 'close', who: 'owner' }, { job: 'close', who: 'partner' }] },
+  { name: 'backup', hour: 20, weekday: 0, messages: [...TABLES.map((t) => ({ backup: t })), { backup: 'prune' }] }, // weekday: UTC, 0 = Sunday
 ];
 
 /** The queue messages of the jobs due now that have not been started today; marks them started. */
 export async function dueJobs(db, nowMs) {
   const t = new Date(nowMs);
-  const hour = JOBS.filter((j) => j.hour === t.getUTCHours());
+  const hour = JOBS.filter((j) => j.hour === t.getUTCHours() && (j.weekday === undefined || j.weekday === t.getUTCDay()));
   if (!hour.length) return [];
   const today = t.toISOString().slice(0, 10);
   const row = await db.prepare("SELECT value FROM config WHERE key = 'daily_done'").first();
@@ -36,7 +39,8 @@ export async function dueJobs(db, nowMs) {
 const jakartaDay = (now) => { const w = new Date(now().getTime() + 7 * 3600000); return new Date(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()); };
 
 /** One queue message of a daily job. Returns a short note of what it did. */
-export async function runJob(db, msg, { now = () => jakarta(), push = null } = {}) {
+export async function runJob(db, msg, { now = () => jakarta(), push = null, bucket = null } = {}) {
+  if (msg.backup) return msg.backup === 'prune' ? pruneBackups(bucket) : backupTable(db, bucket, msg.backup);
   if (msg.feed) return `feed ${msg.feed}: ${await buildFeed(db, msg.feed, { now })} events`;
   const c = cuts(now());
   const cfgRows = (await db.prepare("SELECT key, value FROM config WHERE key IN ('owner_name','owner_email','partner_name','partner_email')").all()).results;
