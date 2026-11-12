@@ -10,17 +10,17 @@ import { localD1 } from './d1shim.js';
 const NOW = new Date('2026-11-11T03:00:00Z');
 const key = (c) => c.repeat(90).slice(0, 87);
 const SUB = (n, owner) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, keys: { p256dh: key('B'), auth: 'a'.repeat(22) }, owner, label: n });
-const ENV = { PUSH_SITE: 'https://site.example/', PUSH_SECRET: 's'.repeat(24) };
+const ENV = { PUSH_SITE: 'https://site.example/', VAPID_PUBLIC_KEY: 'p', VAPID_PRIVATE_KEY: 'k' };
 let db;
 let calls;
-const fakeSite = (statusOf = () => 201) => async (url, init) => {
-  const body = JSON.parse(init.body);
-  calls.push({ url, auth: init.headers.authorization, body });
-  return new Response(JSON.stringify({ results: body.subscriptions.map((s) => ({ endpoint: s.endpoint, status: statusOf(s) })) }), { status: 200 });
+// A fake push sender: remembers what it was asked and answers a status per phone.
+const fakeSite = (statusOf = () => 201) => async (subscriptions, notification) => {
+  calls.push({ body: { subscriptions, notification } });
+  return subscriptions.map((s) => ({ endpoint: s.endpoint, status: statusOf(s) }));
 };
 const set = (k, v) => db.sqlite.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(k, v);
 const cfg = () => Object.fromEntries(db.sqlite.prepare('SELECT key, value FROM config').all().map((r) => [r.key, r.value]));
-const push = (f) => ({ site: 'https://site.example', secret: ENV.PUSH_SECRET, fetch: f });
+const push = (f) => ({ site: 'https://site.example', send: f });
 
 beforeEach(() => {
   calls = [];
@@ -34,12 +34,10 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('deliver', () => {
-  it('sends to the devices the notice is for, with the secret, and only to them', async () => {
+  it('sends to the devices the notice is for, and only to them', async () => {
     const r = await deliver(db, cfg(), push(fakeSite()), { title: 'T', body: 'B' }, { only: 'Dewi' });
     expect(r).toEqual({ sent: 1, gone: 0 });
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://site.example/api/push');
-    expect(calls[0].auth).toBe(`Bearer ${ENV.PUSH_SECRET}`);
     expect(calls[0].body.subscriptions.map((s) => s.endpoint)).toEqual([SUB('dewi-phone').endpoint]);
   });
   it('drops devices the push service says are gone', async () => {
@@ -53,18 +51,16 @@ describe('deliver', () => {
     expect(calls[0].body.subscriptions.map((s) => s.endpoint)).toEqual([SUB('me-phone').endpoint]);
     expect(targets({ ...cfg(), push_devices: '[]' })).toEqual([]);
   });
-  it('says so when the site refuses', async () => {
-    await expect(deliver(db, cfg(), push(async () => new Response('no', { status: 401 })), { title: 'T' })).rejects.toThrow('HTTP 401');
-  });
   it('does nothing when notifications are not set up or nobody joined', async () => {
     expect(await deliver(db, cfg(), null, { title: 'T' })).toMatchObject({ sent: 0 });
     set('push_devices', '[]');
     expect(await deliver(db, cfg(), push(fakeSite()), { title: 'T' })).toMatchObject({ sent: 0 });
     expect(calls).toHaveLength(0);
   });
-  it('pushOf needs both the site and the secret', () => {
+  it('pushOf needs the site and both halves of the key', () => {
     expect(pushOf({})).toBeNull();
     expect(pushOf({ PUSH_SITE: 'https://x' })).toBeNull();
+    expect(pushOf({ PUSH_SITE: 'https://x', VAPID_PUBLIC_KEY: 'p' })).toBeNull();
     expect(pushOf(ENV).site).toBe('https://site.example');
   });
 });
@@ -101,10 +97,19 @@ describe('a phone joining', () => {
 
 describe('the app asking to send', () => {
   it('pushTest goes out after the method and answers with how many phones got it', async () => {
-    vi.stubGlobal('fetch', fakeSite());
-    const { result } = await run({ DB: db, ...ENV }, 'pushTest', {}, { email: '' });
+    const sent = [];
+    vi.stubGlobal('fetch', async (url, init) => { sent.push({ url, init }); return new Response('', { status: 201 }); });
+    const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+    const jwk = await crypto.subtle.exportKey('jwk', keys.privateKey);
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey));
+    const b64 = (u) => btoa(String.fromCharCode(...u)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const phone = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const own = JSON.parse(cfg().push_devices).find((d) => d.label === 'me-phone');
+    set('push_devices', JSON.stringify([{ ...own, keys: { p256dh: b64(new Uint8Array(await crypto.subtle.exportKey('raw', phone.publicKey))), auth: 'a'.repeat(22) } }]));
+    const { result } = await run({ DB: db, PUSH_SITE: ENV.PUSH_SITE, VAPID_PUBLIC_KEY: b64(raw), VAPID_PRIVATE_KEY: jwk.d }, 'pushTest', {}, { email: '' });
     expect(result.sent).toBe(1); // the owner's own phone
-    expect(calls[0].body.notification.title).toMatch(/Cashflow/);
+    expect(sent[0].url).toBe(own.endpoint);
+    expect(sent[0].init.headers.authorization).toMatch(/^vapid t=.+\..+\..+, k=/);
   });
   it('without the site configured the app says notifications are not set up', async () => {
     await expect(run({ DB: db }, 'pushTest', {}, { email: '' })).rejects.toThrow('not set up');

@@ -50,7 +50,7 @@ describe('the mail reader going silent', () => {
 describe('bank mail that could not be read', () => {
   it('goes to the owner only', async () => {
     const sent = [];
-    const push = { site: 'https://s', secret: 'x'.repeat(24), fetch: async (u, init) => { sent.push(JSON.parse(init.body)); return new Response(JSON.stringify({ results: [] })); } };
+    const push = { site: 'https://s', send: async (subscriptions, notification) => { sent.push({ subscriptions, notification }); return []; } };
     const dev = (owner, n) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) }, owner });
     set('push_devices', JSON.stringify([dev('Me', 'one'), dev('Dewi', 'two')]));
     const cfg = Object.fromEntries(db.sqlite.prepare('SELECT key, value FROM config').all().map((r) => [r.key, r.value]));

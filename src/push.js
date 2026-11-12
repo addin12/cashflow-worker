@@ -1,6 +1,7 @@
-// Phone notifications, as the Apps Script app sends them (src/gas/push.js there): the Worker decides what to say and to whom, and the app's site
-// (PUSH_SITE, /api/push, authorised by PUSH_SECRET) encrypts and sends it. The phones are the same list as before (Config push_devices); a phone joins
-// through the site's /notifikasi page, which hands its subscription back here with a one-time code (Config push_nonce).
+// Phone notifications: the Worker decides what to say and to whom and sends it straight to the phones' push services (src/webpush.js, signed with the app's
+// VAPID key). The phones are the list in Config push_devices; a phone joins through the site's /notifikasi page (PUSH_SITE, a plain static site), which
+// hands its subscription back here with a one-time code (Config push_nonce).
+import { sendOne } from './webpush.js';
 import { addDevice, newRowsNotice, parseSubscription, pushEventsOf, pushTargets, safeEqual } from '../vendor/core/push.js';
 
 /** While the Google app is still the live one, the Worker keeps quiet (no double notifications): Config worker_push = on switches its automatic ones on at cutover. */
@@ -8,8 +9,16 @@ export const live = (cfg) => String(cfg.worker_push || '').toLowerCase() === 'on
 const list = (cfg, key) => { try { const v = JSON.parse(cfg[key] || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
 const put = (db, key, value) => db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)').bind(key, value);
 
-/** What the site and the secret are, from the Worker's settings; null when notifications are not set up. */
-export const pushOf = (env, fetchImpl = (...a) => fetch(...a)) => (env.PUSH_SITE && env.PUSH_SECRET ? { site: env.PUSH_SITE.replace(/\/$/, ''), secret: env.PUSH_SECRET, fetch: fetchImpl } : null);
+/**
+ * What the site and the key are, from the Worker's settings (PUSH_SITE, VAPID_PUBLIC_KEY, and the secret VAPID_PRIVATE_KEY); null when notifications are not set up.
+ * `send(subscriptions, notice)` answers one { endpoint, status } per phone.
+ */
+export const pushOf = (env, fetchImpl) => {
+  if (!env.PUSH_SITE || !env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return null;
+  const site = env.PUSH_SITE.replace(/\/$/, '');
+  const vapid = { subject: site, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
+  return { site, send: (subs, notice) => Promise.all(subs.map(async (d) => ({ endpoint: d.endpoint, status: await sendOne(d, notice, vapid, { fetchImpl }) }))) };
+};
 
 /** The notifications a person has switched on (the partner's are their own setting). */
 export function eventsOfPerson(cfg, name) {
@@ -20,17 +29,12 @@ export function eventsOfPerson(cfg, name) {
 export const targets = (cfg, { event = '', only = '' } = {}) => pushTargets(list(cfg, 'push_devices'), { defaultOwner: cfg.owner_name || '', only, event, eventsOf: (n) => eventsOfPerson(cfg, n) });
 export const pushOn = (cfg, event, only = '') => targets(cfg, { event, only }).length > 0;
 
-/** Sends one notice to the devices it is for; devices the push service says are gone are dropped. Throws when the site refuses. */
+/** Sends one notice to the devices it is for; devices the push service says are gone are dropped. */
 export async function deliver(db, cfg, push, notice, { event = '', only = '' } = {}) {
   if (!push || !notice) return { sent: 0, skipped: true };
   const to = targets(cfg, { event, only });
   if (!to.length) return { sent: 0, skipped: true };
-  const res = await push.fetch(`${push.site}/api/push`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${push.secret}` },
-    body: JSON.stringify({ subscriptions: to.slice(0, 10).map((d) => ({ endpoint: d.endpoint, keys: d.keys })), notification: notice }),
-  });
-  if (!res.ok) throw new Error(`notification service answered HTTP ${res.status}`);
-  const results = ((await res.json()).results) || [];
+  const results = await push.send(to.slice(0, 10).map((d) => ({ endpoint: d.endpoint, keys: d.keys })), notice);
   const gone = new Set(results.filter((r) => r.status === 404 || r.status === 410).map((r) => r.endpoint));
   if (gone.size) { // read the list again: a phone may have joined meanwhile
     const now = (await db.prepare("SELECT value FROM config WHERE key = 'push_devices'").first()) || { value: '[]' };

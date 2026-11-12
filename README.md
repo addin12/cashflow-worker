@@ -15,7 +15,7 @@ It is the Cloudflare edition of [cashflow-tracker](https://github.com/addin12/ca
 2. Create a D1 database and load `schema.sql`.
 3. Copy `wrangler.example.toml` to `wrangler.toml` (and `wrangler.feed.example.toml` to `wrangler.feed.toml`) and fill in your own values. Those two files are not committed.
 4. Put the household in the database's `config` table (owner and partner names and emails, the mail accounts) and the app's data in its tables (`scripts/migrate-real.mjs` shows how one real household was moved in).
-5. Secrets are set with `wrangler secret put`: `MAIL_TOKEN`, `PUSH_SECRET`, and for the feed Worker `FEED_OWNER` and `FEED_PARTNER`.
+5. Secrets are set with `wrangler secret put`: `MAIL_TOKEN`, `VAPID_PRIVATE_KEY`, and for the feed Worker `FEED_OWNER` and `FEED_PARTNER`.
 6. `npm run deploy`.
 
 ## Tests
