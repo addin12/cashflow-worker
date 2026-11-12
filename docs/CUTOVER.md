@@ -9,7 +9,7 @@ Do this only when the owner says so, and only after the shadow run (about two we
 ## During the shadow run (now)
 - The Google app stays the real one. The Cloudflare app reads the same mail on its own and keeps its own copy: open it at
   https://<your-worker>.workers.dev (sign in with the one-time code).
-- Every morning (07:23 WIB) `node scripts/compare-data.mjs` compares the Sheet with the Cloudflare data. Edits made by hand in the Google app
+- Every morning (07:23 WIB) `node scripts/compare-data.mjs` (removed on 2026-11-12 with the Sheet) compared the Sheet with the Cloudflare data. Edits made by hand in the Google app
   do not appear in Cloudflare: that is the only expected difference. Anything else is looked into.
 - Cloudflare's automatic notifications are OFF (Config `worker_push` empty), so phones do not get everything twice. "Send test notification"
   in the Cloudflare app's settings still works (a phone must have joined through the Google app's link first; see below).
