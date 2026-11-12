@@ -1,0 +1,23 @@
+{
+  "name": "cashflow-worker",
+  "version": "1.0.0",
+  "description": "Cashflow Tracker on Cloudflare: the app API over D1, the Gmail sync, the schedule",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "build:ui": "node scripts/build-ui.mjs",
+    "explain": "node scripts/explain.mjs",
+    "deploy": "npm run build:ui && wrangler deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "wrangler": "^4.160.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

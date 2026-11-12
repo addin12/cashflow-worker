@@ -1,0 +1,46 @@
+# Copy this file to wrangler.toml (which is not committed) and fill in your own values.
+name = "cashflow"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# The app's database. Create it once: wrangler d1 create cashflow, then put its id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "cashflow"
+database_id = "<your-d1-database-id>"
+
+# Gmail comes from the household-mail Worker (the only place the sign-ins live).
+[[services]]
+binding = "MAIL"
+service = "household-mail"
+
+# New mail: the schedule lists it, the queue reads one email at a time (one at once, so two emails of a transfer never race).
+[[queues.producers]]
+queue = "cashflow-sync"
+binding = "SYNC_QUEUE"
+
+[[queues.consumers]]
+queue = "cashflow-sync"
+max_batch_size = 1
+max_concurrency = 1
+max_retries = 3
+
+[triggers]
+crons = ["* * * * *", "*/30 * * * *"]
+
+# Secrets (never in this file): wrangler secret put <NAME>
+#   MAIL_TOKEN   the household-mail Worker's bearer token
+#   APP_TOKEN    the token the app sends (until Cloudflare Access is in front)
+
+# The page: the app's screens as one static file (scripts/build-ui.mjs writes public/index.html); the Worker serves it after the sign-in check.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+# Cloudflare Access: the Worker accepts only a valid Access sign-in from the two people of the household (not secrets: public identifiers).
+[vars]
+# The app's site that sends phone notifications (it needs the secret PUSH_SECRET: wrangler secret put PUSH_SECRET).
+PUSH_SITE = "https://<your-notification-site>"
+ACCESS_TEAM = "<your-access-team-name>"
+ACCESS_AUD = "<application-audience-tag>"

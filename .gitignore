@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+.dev.vars
+private/
+secrets/
+seed.sql
+public/
+wrangler.toml
+wrangler.feed.toml

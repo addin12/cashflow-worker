@@ -1,0 +1,11 @@
+# Copy this file to wrangler.feed.toml (which is not committed) and fill in your own values.
+# The calendar feed (src/feed-worker.js): a second, tiny Worker with no sign-in, because Google Calendar cannot pass Cloudflare Access.
+# It answers only /<secret>.ics and only reads the stored feed row. Secrets: wrangler secret put FEED_OWNER -c wrangler.feed.toml (and FEED_PARTNER).
+name = "cashflow-feed"
+main = "src/feed-worker.js"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cashflow"
+database_id = "<your-d1-database-id>"

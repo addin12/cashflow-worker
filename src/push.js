@@ -1,0 +1,94 @@
+// Phone notifications, as the Apps Script app sends them (src/gas/push.js there): the Worker decides what to say and to whom, and the app's site
+// (PUSH_SITE, /api/push, authorised by PUSH_SECRET) encrypts and sends it. The phones are the same list as before (Config push_devices); a phone joins
+// through the site's /notifikasi page, which hands its subscription back here with a one-time code (Config push_nonce).
+import { addDevice, newRowsNotice, parseSubscription, pushEventsOf, pushTargets, safeEqual } from '../vendor/core/push.js';
+
+/** While the Google app is still the live one, the Worker keeps quiet (no double notifications): Config worker_push = on switches its automatic ones on at cutover. */
+export const live = (cfg) => String(cfg.worker_push || '').toLowerCase() === 'on';
+const list = (cfg, key) => { try { const v = JSON.parse(cfg[key] || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+const put = (db, key, value) => db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)').bind(key, value);
+
+/** What the site and the secret are, from the Worker's settings; null when notifications are not set up. */
+export const pushOf = (env, fetchImpl = (...a) => fetch(...a)) => (env.PUSH_SITE && env.PUSH_SECRET ? { site: env.PUSH_SITE.replace(/\/$/, ''), secret: env.PUSH_SECRET, fetch: fetchImpl } : null);
+
+/** The notifications a person has switched on (the partner's are their own setting). */
+export function eventsOfPerson(cfg, name) {
+  const partner = Boolean(cfg.partner_email) && name === cfg.partner_name;
+  return pushEventsOf(cfg[partner ? 'partner_push_events' : 'push_events']);
+}
+/** The devices that should get `event`; `only`: just that person's. */
+export const targets = (cfg, { event = '', only = '' } = {}) => pushTargets(list(cfg, 'push_devices'), { defaultOwner: cfg.owner_name || '', only, event, eventsOf: (n) => eventsOfPerson(cfg, n) });
+export const pushOn = (cfg, event, only = '') => targets(cfg, { event, only }).length > 0;
+
+/** Sends one notice to the devices it is for; devices the push service says are gone are dropped. Throws when the site refuses. */
+export async function deliver(db, cfg, push, notice, { event = '', only = '' } = {}) {
+  if (!push || !notice) return { sent: 0, skipped: true };
+  const to = targets(cfg, { event, only });
+  if (!to.length) return { sent: 0, skipped: true };
+  const res = await push.fetch(`${push.site}/api/push`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${push.secret}` },
+    body: JSON.stringify({ subscriptions: to.slice(0, 10).map((d) => ({ endpoint: d.endpoint, keys: d.keys })), notification: notice }),
+  });
+  if (!res.ok) throw new Error(`notification service answered HTTP ${res.status}`);
+  const results = ((await res.json()).results) || [];
+  const gone = new Set(results.filter((r) => r.status === 404 || r.status === 410).map((r) => r.endpoint));
+  if (gone.size) { // read the list again: a phone may have joined meanwhile
+    const now = (await db.prepare("SELECT value FROM config WHERE key = 'push_devices'").first()) || { value: '[]' };
+    await put(db, 'push_devices', JSON.stringify(list({ push_devices: now.value }, 'push_devices').filter((d) => !gone.has(d.endpoint)))).run();
+  }
+  return { sent: results.filter((r) => r.status >= 200 && r.status < 300).length, gone: gone.size };
+}
+
+/** A phone coming back from the site's /notifikasi page: kept only with the current one-time code. Returns true when it was added. */
+export async function acceptDevice(db, raw, code, label, owner, { now = Date.now } = {}) {
+  const rows = (await db.prepare("SELECT key, value FROM config WHERE key IN ('push_nonce', 'push_devices')").all()).results;
+  const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  const [want, at] = String(cfg.push_nonce || '').split(' ');
+  if (!want || !code || !safeEqual(code, want) || now() - Number(at) > 30 * 60000) return false;
+  const sub = parseSubscription(raw);
+  if (!sub) return false;
+  await db.batch([put(db, 'push_devices', JSON.stringify(addDevice(list(cfg, 'push_devices'), sub, label, new Date(now()).toISOString(), owner))), put(db, 'push_nonce', '')]);
+  return true;
+}
+
+/** New rows from a sync: each person hears about the rows of their own accounts (what they have switched on). Never throws: the rows are saved. */
+export async function notifyNewRows(db, cfg, push, rows) {
+  if (!push || !live(cfg) || !rows.length || !list(cfg, 'push_devices').length) return;
+  try {
+    const big = String(cfg.big_amount ?? '').trim();
+    const lang = String(cfg.language || 'id') === 'en' ? 'en' : 'id';
+    const byPerson = new Map();
+    rows.forEach((r) => { const who = r.owner || cfg.owner_name; byPerson.set(who, [...(byPerson.get(who) || []), r]); });
+    for (const [who, mine] of byPerson) {
+      const notice = newRowsNotice(mine, { bigAmount: big === '' ? 1000000 : Number(big) || 0, events: eventsOfPerson(cfg, who), lang });
+      if (notice) await deliver(db, cfg, push, notice, { only: who });
+    }
+  } catch (e) { /* only the notification is lost */ }
+}
+
+/** Tells the owner something about the sync itself (a phone notification: the app's sync alerts used to be e-mails). Never throws. */
+export async function alertOwner(db, push, notice) {
+  if (!push) return;
+  try {
+    const cfg = Object.fromEntries((await db.prepare("SELECT key, value FROM config WHERE key IN ('owner_name', 'push_devices', 'push_events', 'language')").all()).results.map((r) => [r.key, r.value]));
+    await deliver(db, cfg, push, notice, { only: cfg.owner_name });
+  } catch (e) { /* the app shows the problem on the Cek screen too */ }
+}
+
+/** The mail reader has been silent for hours. */
+export const staleNotice = (hours, lang = 'id') => ({
+  title: lang === 'en' ? 'Gmail is not being read' : 'Gmail tidak terbaca',
+  body: lang === 'en' ? `No bank e-mail has been read for ${hours} hours. Check the Gmail connection.` : `Email bank belum terbaca selama ${hours} jam. Cek koneksi Gmail.`,
+  url: '/cek', tag: 'sync-stale',
+});
+
+/** Bank e-mails that could not be read (log lines with status error): to the owner. */
+export async function alertUnread(db, cfg, push, lines) {
+  if (!push || !lines.length) return;
+  const lang = String(cfg.language || 'id') === 'en' ? 'en' : 'id';
+  await alertOwner(db, push, {
+    title: lang === 'en' ? 'Bank e-mail not understood' : 'Email bank tidak terbaca',
+    body: lines.slice(0, 3).map((l) => `${l.subject || '?'}${l.reason ? ` · ${l.reason}` : ''}`).join('\n'),
+    url: '/cek', tag: 'sync-unread',
+  });
+}
