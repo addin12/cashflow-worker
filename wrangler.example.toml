@@ -33,6 +33,10 @@ crons = ["* * * * *", "*/30 * * * *"]
 #   APP_TOKEN    the token the app sends (until Cloudflare Access is in front)
 
 # The page: the app's screens as one static file (scripts/build-ui.mjs writes public/index.html); the Worker serves it after the sign-in check.
+# The free AI that helps to read a question the rules cannot (src/ask-ai.js): Workers AI, inside Cloudflare's daily free allowance.
+[ai]
+binding = "AI"
+
 # The weekly backup (src/backup.js): a private bucket, created once with: npx wrangler r2 bucket create cashflow-backup
 [[r2_buckets]]
 binding = "BACKUP"

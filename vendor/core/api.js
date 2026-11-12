@@ -28,6 +28,7 @@ import { missingSalaries, salaryCategory, paydayPeriod, currentPaydayMonth, payd
 import { daysUntilPayday } from './payday.js';
 import { paydayPlan } from './paydayplan.js';
 import { topPlaces, biggestExpenses, moneyFlow, spendingPattern, tagTotals, newPlaceIds, underBudget } from './insights.js';
+import { answerQuestion, parseQuestion, sanitizeParsed } from './ask.js';
 import { netWorth, assetProblems, ASSET_KINDS, duePlans, owedSummary, upcomingBills, financialHealth, warrantyEnds, parsePriceStatus } from './wealth.js';
 import { markClaim, openClaims, CLAIM_STATUSES, DEFAULT_CLAIM_DAYS } from './claims.js';
 import { sharedBalance } from './shared.js';
@@ -986,6 +987,27 @@ export function createApi(store, env) {
     },
 
     /** Data for the weekly summary email (gas/weekly.js turns it into the email). */
+    /**
+     * "Tanya apa saja": a question in words. `text` is read by the rules; `parsed` is what something else (the Worker's AI) understood of it, and is checked
+     * field by field. The answer is data computed from the rows; nothing is written. An unreadable question answers { kind: 'unknown', context } so the
+     * caller may ask the AI with the names that exist (categories, people), never with amounts.
+     */
+    ask({ text, parsed } = {}) {
+      const c = cats();
+      const ctx = { categories: c, members: members(), me: String(env.meName || '') };
+      const p = parsed ? sanitizeParsed(parsed, ctx, text) : parseQuestion(text, ctx);
+      if (!p) return { kind: 'unknown', context: { ...ctx, today: isoDate(now()) } };
+      const all = rows();
+      const today = now();
+      const m = currentMonth();
+      const rec = recurring(all);
+      return answerQuestion(p, {
+        rows: all, cats: c, today, members: ctx.members, me: ctx.me, budgets: budgetRows(''), recurring: rec,
+        month: (which) => { const r = rangeOf(which === 'last' ? monthAdd(m, -1) : m); return r && r.from && r.to ? { from: r.from, to: r.to } : null; },
+        bills: upcomingBills(store.read(TABS.plans), rec.items, today, 14, cards(all)),
+      });
+    },
+
     weekly() {
       const all = rows();
       return weeklySummary({
@@ -1267,7 +1289,7 @@ export function renameCategoryEverywhere(store, renamed) {
 }
 
 export const API_METHODS = [
-  'init', 'bootstrap', 'review', 'approve', 'ignore', 'restore', 'list', 'update', 'remove', 'add', 'dashboard', 'monthTotals', 'incoming', 'settings',
+  'ask', 'init', 'bootstrap', 'review', 'approve', 'ignore', 'restore', 'list', 'update', 'remove', 'add', 'dashboard', 'monthTotals', 'incoming', 'settings',
   'saveAccounts', 'saveCategories', 'saveRules', 'saveBudgets', 'saveConfig', 'balanceCheck', 'syncNow', 'split', 'unsplit', 'sendSummary', 'saveGoals',
   'recordSalary', 'skipSalary', 'unskipSalary', 'hideRecurring', 'unhideRecurring', 'balanceCheckAll',
   'yearly', 'importStatement', 'undoImport', 'updateMany', 'tagih', 'owedSet', 'owedRemove', 'savePlans', 'saveAssets', 'markRecurring',

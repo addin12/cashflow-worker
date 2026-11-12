@@ -4,6 +4,7 @@ import { jakarta } from './clock.js';
 import { API_METHODS } from '../vendor/core/api.js';
 import { HttpError, personFor } from './identity.js';
 import { mailClient } from './mail.js';
+import { askWithHelp } from './ask-ai.js';
 import { pushOf } from './push.js';
 import { syncNow } from './sync.js';
 import { openUnit } from './unit.js';
@@ -25,6 +26,7 @@ export function cuts(at = new Date(), payday = 28) {
 export function cutFor(method, args = {}, part = '', at = new Date(), payday = 28) {
   const c = cuts(at, payday);
   if (part === 'bills' || WIDE.has(method)) return c.bills;
+  if (method === 'ask') return '1970-01-01'; // any period of any year, "when did I last pay…"
   if (method === 'list' && (Number(args.limit) > 500 || Object.keys(args).some((k) => k !== 'limit'))) return '1970-01-01'; // the whole list (the screen filters it itself)
   const year = Number(args.year);
   if ((method === 'yearly' || method === 'spt') && year >= 2000) return `${year - 1}-12-28`;
@@ -45,6 +47,7 @@ const NEEDS_LOG = new Set(['review', 'bootstrap', 'init']);
 export async function run(env, method, args, { part, email = '', now = () => jakarta() } = {}) {
   if (method === 'syncNow') return { result: await syncNow({ db: env.DB, mail: mailClient(env.MAIL, env.MAIL_TOKEN), queue: env.SYNC_QUEUE }), written: { statements: 0 } }; // not a method of the app's core: the Worker's own
   const unit = await openUnit(env.DB, cutFor(method, args || {}, part, now()), { rules: true, inbox: NEEDS_LOG.has(method), now, who: (cfg) => personFor(cfg, email), push: pushOf(env) });
+  if (method === 'ask') return { result: await askWithHelp({ call: (name, a) => unit.call(name, a), ai: env.AI }, String((args || {}).text || '').slice(0, 200)), written: { statements: 0 } }; // the rules first, the free AI only for what they cannot read
   const { result, written } = await unit.call(method, args);
   return { result, written };
 }
