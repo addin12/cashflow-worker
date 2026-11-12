@@ -3,7 +3,9 @@
 import { jakarta } from './clock.js';
 import { API_METHODS } from '../vendor/core/api.js';
 import { HttpError, personFor } from './identity.js';
+import { mailClient } from './mail.js';
 import { pushOf } from './push.js';
+import { syncNow } from './sync.js';
 import { openUnit } from './unit.js';
 
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -41,6 +43,7 @@ const NEEDS_LOG = new Set(['review', 'bootstrap', 'init']);
 
 /** Runs one app method for one request. `args` as the screen sends them; `email` is who Cloudflare Access said is asking (empty in token mode). */
 export async function run(env, method, args, { part, email = '', now = () => jakarta() } = {}) {
+  if (method === 'syncNow') return { result: await syncNow({ db: env.DB, mail: mailClient(env.MAIL, env.MAIL_TOKEN), queue: env.SYNC_QUEUE }), written: { statements: 0 } }; // not a method of the app's core: the Worker's own
   const unit = await openUnit(env.DB, cutFor(method, args || {}, part, now()), { rules: true, inbox: NEEDS_LOG.has(method), now, who: (cfg) => personFor(cfg, email), push: pushOf(env) });
   const { result, written } = await unit.call(method, args);
   return { result, written };

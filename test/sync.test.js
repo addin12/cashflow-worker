@@ -6,6 +6,7 @@ import { createApi } from '../vendor/core/api.js';
 import { parseEmail, READ_SIGNATURE } from '../vendor/core/parsers/index.js';
 import { planSync } from '../vendor/core/plan.js';
 import { TABS } from '../vendor/core/schema.js';
+import { run as runApp } from '../src/app.js';
 import { processEmail, scan } from '../src/sync.js';
 import { SLOTS } from '../src/shared.js';
 import { localD1 } from './d1shim.js';
@@ -149,6 +150,46 @@ describe('scan', () => {
     const out = await scan(db, broken, { now: () => NOW.getTime() });
     expect(out.messages).toEqual([]);
     expect(out.notes[0]).toBe('addin: mail service answered 500');
+  });
+});
+
+describe('the Sinkron sekarang button', () => {
+  // the Worker's own method: the mail reader is reached through a service binding, the emails are read later from the queue
+  const binding = { fetch: async (_url, init) => {
+    const b = JSON.parse(init.body);
+    const [, who, what] = /gmail_(\w+)_(list|fetch)/.exec(b.params.name);
+    const out = what === 'list' ? await mail.list(who, b.params.arguments.query, b.params.arguments.max) : await mail.fetch(who, b.params.arguments.id);
+    return new Response(JSON.stringify({ result: { content: [{ text: JSON.stringify(out) }] } }));
+  } };
+  const queue = () => { const q = { sent: [], sendBatch: async (batch) => { q.sent.push(...batch); } }; return q; };
+  const ask = (q) => runApp({ DB: db, MAIL: binding, MAIL_TOKEN: 't'.repeat(24), SYNC_QUEUE: q }, 'syncNow', {}, { now: () => NOW });
+
+  it('looks at Gmail at once and queues every new email; the answer is how many it found', async () => {
+    const q = queue();
+    db.newRequest();
+    const { result } = await ask(q);
+    expect(result).toEqual({ status: 'ok', added: mailbox.length });
+    expect(q.sent).toHaveLength(mailbox.length);
+    expect(q.sent[0].body).toMatchObject({ who: 'addin' });
+  });
+  it('pressed again straight away it finds nothing new (what is queued is not queued twice)', async () => {
+    const q = queue();
+    db.newRequest(); await ask(q);
+    db.newRequest();
+    const { result } = await ask(q);
+    expect(result.added).toBe(0);
+    expect(q.sent).toHaveLength(mailbox.length);
+  });
+  it('always makes the full pass, whatever the minute', async () => {
+    const calls = [];
+    const spy = { ...mail, list: async (who, q, max) => { calls.push(max); return mail.list(who, q, max); } };
+    await scan(db, spy, { now: () => NOW.getTime() });
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 60000 }); // an ordinary minute: one short question
+    expect(calls).toEqual([60]);
+    calls.length = 0;
+    await scan(db, spy, { now: () => NOW.getTime() + 120000, full: true });
+    expect(calls).toEqual([200, 100]);
   });
 });
 

@@ -58,7 +58,7 @@ const QUICK_IF_OK_WITHIN_MS = 30 * 60000; // an id sent to the queue is not sent
  * A quiet minute must cost almost nothing (D1 charges every row read, and this runs 1,440 times a day): the ids already handled are
  * remembered in Config (known_ids), the ids just sent to the queue too (queued_ids), so only mail never seen before reaches the database.
  */
-export async function scan(db, mail, { now = () => Date.now() } = {}) {
+export async function scan(db, mail, { now = () => Date.now(), full = false } = {}) {
   const keys = ['mail_accounts', 'start_date', 'read_signature', 'retry_pending', 'known_ids', 'queued_ids', 'scan_ok', 'scan_alerted'];
   const cfg = Object.fromEntries((await db.prepare(`SELECT key, value FROM config WHERE key IN (${keys.map((_, i) => `?${i + 1}`).join(', ')})`).bind(...keys).all()).results.map((r) => [r.key, r.value]));
   const accounts = accountsOf(cfg);
@@ -75,7 +75,7 @@ export async function scan(db, mail, { now = () => Date.now() } = {}) {
   const hourly = t.getUTCMinutes() === 0;
   const daily = hourly && t.getUTCHours() === 3;
   const changed = cfg.read_signature !== READ_SIGNATURE;
-  const quick = !changed && !hourly && Number(cfg.scan_ok) > 0 && now() - Number(cfg.scan_ok) < QUICK_IF_OK_WITHIN_MS;
+  const quick = !full && !changed && !hourly && Number(cfg.scan_ok) > 0 && now() - Number(cfg.scan_ok) < QUICK_IF_OK_WITHIN_MS;
   const pending = json(cfg.retry_pending, []);
   for (const id of Object.keys(queued)) if (now() - queued[id] > 3 * QUEUED_FOR_MS) delete queued[id];
   for (const a of accounts) {
@@ -124,6 +124,16 @@ export async function scan(db, mail, { now = () => Date.now() } = {}) {
   await db.batch(writes);
   if (retry.length) notes.push(`${retry.length} read again`);
   return { messages, notes, stale: stale ? { hours: Math.floor((now() - okAt) / 3600000) } : null };
+}
+
+/**
+ * The "Sinkron sekarang" button: looks at Gmail at once with the full pass (what the top of the hour does) and queues what is new. The emails are then read
+ * one by one in the background, so the answer is how many were found.
+ */
+export async function syncNow({ db, mail, queue }, { now = () => Date.now() } = {}) {
+  const { messages } = await scan(db, mail, { now, full: true });
+  for (let i = 0; i < messages.length; i += 50) await queue.sendBatch(messages.slice(i, i + 50).map((body) => ({ body })));
+  return { status: 'ok', added: messages.length };
 }
 
 /** What planSync needs to know about the household. */
