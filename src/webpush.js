@@ -1,5 +1,5 @@
 // Web Push from the Worker itself: the message is encrypted (RFC 8291, aes128gcm) and signed (VAPID, RFC 8292) with the platform's WebCrypto, no library.
-// It replaces the small function the app's old site (Vercel) ran for this.
+// It replaces a small relay function that used to run on the app's old site.
 const text = new TextEncoder();
 
 /** The push services of the browsers; a stored endpoint anywhere else is never called. */

@@ -25,7 +25,7 @@ Do this only when the owner says so, and only after the shadow run (about two we
    moment the Google Sheet is the source; ask the owner before running it.
 4. Switch the automatic notifications on: `npx wrangler d1 execute cashflow --remote --command "INSERT OR REPLACE INTO config (key, value) VALUES ('worker_push', 'on')"`.
 5. Point the notifications site at Cloudflare, so phones can join: in the notification site's repository merge branch `cutover` (it changes the address
-   in `index.js`, `notifikasi.js`, `index.html`, `notifikasi.html` from the Google script to the Cloudflare Worker) and push; Vercel deploys it.
+   in `index.js`, `notifikasi.js`, `index.html`, `notifikasi.html` from the Google script to the Cloudflare Worker) and deploy it (`npx wrangler deploy` in the karjimut folder).
    Every phone then opens Settings -> Notifications -> enable on this device once more (the old ones keep working until they are replaced).
 6. Both people open the Cloudflare address, add it to the home screen, and send a test notification.
 7. Watch for a day: the Worker alerts the owner by notification if Gmail stops being read. `node scripts/compare-data.mjs` is no longer

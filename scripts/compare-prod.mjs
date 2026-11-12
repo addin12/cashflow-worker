@@ -7,6 +7,8 @@ import { createApi } from '../vendor/core/api.js';
 import { buildCategorySlots } from '../vendor/core/categories.js';
 import { TABS } from '../vendor/core/schema.js';
 import { url as cashflowUrl } from './urls.mjs';
+import { assertBudget } from './budget.mjs';
+await assertBudget(); // these read the live database: never when the day's free reads are half used (see budget.mjs)
 
 const url = process.argv[2] || cashflowUrl('cashflow');
 const token = readFileSync(new URL('../secrets/app-token.txt', import.meta.url), 'utf8').trim();

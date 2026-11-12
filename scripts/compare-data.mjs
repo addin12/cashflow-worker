@@ -7,6 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { TABS } from '../vendor/core/schema.js';
 import { keyOf } from '../src/unit.js';
+import { assertBudget } from './budget.mjs';
+await assertBudget(); // these read the live database: never when the day's free reads are half used (see budget.mjs)
 
 const root = new URL('..', import.meta.url);
 execFileSync(process.execPath, ['scripts/export-real.mjs'], { cwd: root, stdio: 'ignore' });
