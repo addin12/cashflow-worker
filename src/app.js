@@ -5,6 +5,7 @@ import { API_METHODS } from '../vendor/core/api.js';
 import { HttpError, personFor } from './identity.js';
 import { mailClient } from './mail.js';
 import { askWithHelp } from './ask-ai.js';
+import { startYearlyScan } from './yearly.js';
 import { pushOf } from './push.js';
 import { syncNow } from './sync.js';
 import { openUnit } from './unit.js';
@@ -46,6 +47,7 @@ const NEEDS_LOG = new Set(['review', 'bootstrap', 'init']);
 /** Runs one app method for one request. `args` as the screen sends them; `email` is who Cloudflare Access said is asking (empty in token mode). */
 export async function run(env, method, args, { part, email = '', now = () => jakarta() } = {}) {
   if (method === 'syncNow') return { result: await syncNow({ db: env.DB, mail: mailClient(env.MAIL, env.MAIL_TOKEN), queue: env.SYNC_QUEUE }), written: { statements: 0 } }; // not a method of the app's core: the Worker's own
+  if (method === 'scanYearly') return { result: await startYearlyScan({ db: env.DB, mail: mailClient(env.MAIL, env.MAIL_TOKEN), queue: env.SYNC_QUEUE, email }), written: { statements: 0 } }; // reads Gmail: the Worker's own, not the core's
   const unit = await openUnit(env.DB, cutFor(method, args || {}, part, now()), { rules: true, inbox: NEEDS_LOG.has(method), now, who: (cfg) => personFor(cfg, email), push: pushOf(env) });
   if (method === 'ask') return { result: await askWithHelp({ call: (name, a) => unit.call(name, a), ai: env.AI }, String((args || {}).text || '').slice(0, 200)), written: { statements: 0 } }; // the rules first, the free AI only for what they cannot read
   const { result, written } = await unit.call(method, args);

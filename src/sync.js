@@ -45,6 +45,7 @@ const KNOWN_PER_ACCOUNT = 400; // handled ids remembered per account (a few days
 const STALE_AFTER_MS = 2 * 3600000; // the mail reader has not answered for this long: tell the owner
 const ALERT_EVERY_MS = 12 * 3600000;
 const QUEUED_FOR_MS = 20 * 60000;
+const STAMP_EVERY_MS = 20 * 60000; // a mailbox that answered is marked as read at most this often (the app calls one that was not marked for 2 hours "stopped")
 // An ordinary minute asks Gmail only about the last half hour, once per account (one short list instead of two long ones: a third of the CPU).
 // The full pass (two days back from the checkpoint, plus the receipts since the start date) runs at the top of every hour, when the readers changed,
 // on the first scan, and whenever the last good scan is more than half an hour old (after an outage), so nothing slips through for more than an hour.
@@ -70,6 +71,7 @@ export async function scan(db, mail, { now = () => Date.now(), full = false } = 
   const queuedBefore = JSON.stringify(queued);
   const messages = [];
   const notes = [];
+  const looked = []; // per mailbox: did Gmail answer? (marks the connection, so a quiet mailbox is not reported as stopped)
   let failed = false;
   const t = new Date(now());
   const hourly = t.getUTCMinutes() === 0;
@@ -85,7 +87,8 @@ export async function scan(db, mail, { now = () => Date.now(), full = false } = 
     let listed;
     try {
       listed = quick ? await mail.list(a.who, query, 60) : [...new Set([...(await mail.list(a.who, query, 200)), ...(await mail.list(a.who, backfillQuery(Math.floor(startMs / 1000)), 100))])];
-    } catch (e) { notes.push(`${a.who}: ${e.message}`); failed = true; continue; }
+    } catch (e) { notes.push(`${a.who}: ${e.message}`); failed = true; looked.push({ conn, ok: false, why: String(e.message || e).slice(0, 120) }); continue; }
+    looked.push({ conn, ok: true });
     const mine = new Set(known[a.who] || []);
     const unseen = listed.filter((id) => !mine.has(id) && !(queued[id] && now() - queued[id] < QUEUED_FOR_MS));
     // Only mail not remembered reaches the database: is it already in the transactions or the log?
@@ -113,6 +116,19 @@ export async function scan(db, mail, { now = () => Date.now(), full = false } = 
   const rest = pending.slice(MAX_RETRIES_PER_RUN);
   const put = (k, v) => db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)').bind(k, v);
   const writes = [put('scan_checked', String(now()))]; // when the mail was last looked at: the pages show it
+  // Every mailbox Gmail answered for is marked as read now (not only when a bank e-mail turned up); one it did not answer for says why, and keeps its old time.
+  const iso = new Date(now()).toISOString();
+  let marked = false;
+  for (const l of looked) {
+    const c = l.conn;
+    if (!c || !c.gmail) continue;
+    const age = now() - (Date.parse(c.last_sync) || 0);
+    const next = l.ok
+      ? (age > STAMP_EVERY_MS || /^ERROR/.test(String(c.last_status || '')) ? { ...c, last_sync: iso, last_status: `live ok: ${iso.slice(0, 10)}` } : null)
+      : (/^ERROR/.test(String(c.last_status || '')) ? null : { ...c, last_status: `ERROR: ${l.why}` });
+    if (next) { writes.push(db.prepare('UPDATE tabs SET json = ?1 WHERE tab = ?2 AND id = ?3').bind(JSON.stringify(next), TABS.connections, c.gmail)); marked = true; }
+  }
+  if (marked) writes.push(put('data_stamp', String(now())));
   // The mail reader answering is what 'healthy' means. When it has not for STALE_AFTER_MS, say so once per ALERT_EVERY_MS (the caller sends the alert).
   const okAt = Number(cfg.scan_ok) || now();
   if (!failed && (!cfg.scan_ok || now() - okAt > 10 * 60000)) writes.push(put('scan_ok', String(now())));

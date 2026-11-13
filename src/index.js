@@ -123,7 +123,7 @@ export default {
     const mail = mailClient(env.MAIL, env.MAIL_TOKEN);
     for (const msg of batch.messages) {
       try {
-        if (msg.body.feed || msg.body.job) await runJob(env.DB, msg.body, { push: pushOf(env), bucket: env.BACKUP });
+        if (msg.body.feed || msg.body.job) await runJob(env.DB, msg.body, { push: pushOf(env), bucket: env.BACKUP, mail });
         else await processEmail(env.DB, mail, msg.body, { push: pushOf(env) });
         msg.ack();
       } catch (e) { msg.retry({ delaySeconds: 60 }); }

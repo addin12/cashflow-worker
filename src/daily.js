@@ -5,6 +5,7 @@
 //   evening  21:00 Jakarta  "close the day" nudge, for whoever switched it on
 //   backup   Sunday 20:00 UTC (Monday 03:00 Jakarta)  every table as SQL into the R2 bucket, the newest 8 weeks kept (src/backup.js)
 import { TABLES, backupTable, pruneBackups } from './backup.js';
+import { yearlyChunk } from './yearly.js';
 import { jakarta } from './clock.js';
 import { isPayday } from '../vendor/core/payday.js';
 import { billsNotice, claimsNotice, closeNotice, paydayNotice, warrantyNotice } from '../vendor/core/push.js';
@@ -39,7 +40,8 @@ export async function dueJobs(db, nowMs) {
 const jakartaDay = (now) => { const w = new Date(now().getTime() + 7 * 3600000); return new Date(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()); };
 
 /** One queue message of a daily job. Returns a short note of what it did. */
-export async function runJob(db, msg, { now = () => jakarta(), push = null, bucket = null } = {}) {
+export async function runJob(db, msg, { now = () => jakarta(), push = null, bucket = null, mail = null } = {}) {
+  if (msg.job === 'yearly') return yearlyChunk(db, mail, msg); // a batch of e-mails of "Cari langganan tahunan" (src/yearly.js)
   if (msg.backup) return msg.backup === 'prune' ? pruneBackups(bucket) : backupTable(db, bucket, msg.backup);
   if (msg.feed) return `feed ${msg.feed}: ${await buildFeed(db, msg.feed, { now })} events`;
   const c = cuts(now());
