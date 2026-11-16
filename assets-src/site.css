@@ -1,0 +1,39 @@
+:root {
+  --bg: #f5f5f7; --card: #fff; --ink: #1d1d1f; --muted: #6e6e73; --line: #e5e5ea;
+  --accent: #0066cc; --accent-press: #0057ad; --accent-soft: #e8f1fb; --ok: #1a7f37; --bad: #c9252c;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #000; --card: #1c1c1e; --ink: #f5f5f7; --muted: #a1a1a6; --line: #38383a; --accent: #2997ff; --accent-press: #4aa8ff; --accent-soft: #10263f; --ok: #4cc76c; --bad: #ff6b6b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 480px; margin: 0 auto; padding: 48px 16px 32px; text-align: center; }
+.app-icon { width: 72px; height: 72px; }
+h1 { font-size: 28px; margin: 12px 0 20px; }
+h2 { font-size: 19px; margin: 0 0 6px; }
+p { margin: 0 0 12px; }
+.lead { color: var(--muted); margin-bottom: 24px; }
+.muted { color: var(--muted); }
+.small { font-size: 15px; }
+.card { background: var(--card); border-radius: 16px; padding: 20px; margin: 28px 0 16px; text-align: left; }
+.card p { color: var(--muted); }
+ol { padding-left: 22px; margin: 8px 0 0; }
+li { margin-bottom: 8px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 12px 24px; border-radius: 999px; border: 0; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.btn.primary { background: var(--accent); color: #fff; min-width: 220px; }
+.btn.primary:active { background: var(--accent-press); }
+.btn.secondary { background: var(--accent-soft); color: var(--accent); margin-top: 4px; }
+.btn:disabled { opacity: .6; cursor: default; }
+.btn:focus-visible, .link:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.link { color: var(--accent); display: inline-block; padding: 12px 4px; }
+.ok { color: var(--ok); font-weight: 600; }
+.msg { min-height: 1.5em; margin-top: 16px; }
+.msg.bad { color: var(--bad); }
+[hidden] { display: none !important; }
+main, .card, p { overflow-wrap: anywhere; }
+
+.doc { text-align: left; }
+.doc .app-icon { display: block; }
+.doc section { margin-bottom: 28px; }
+code { background: var(--accent-soft); padding: 1px 6px; border-radius: 6px; font-size: 15px; }

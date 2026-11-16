@@ -50,7 +50,7 @@ run_worker_first = true
 # Cloudflare Access: the Worker accepts only a valid Access sign-in from the two people of the household (not secrets: public identifiers).
 [vars]
 # The app's small public site (where a phone turns notifications on) and the public half of the key the Worker signs notifications with (secret: VAPID_PRIVATE_KEY).
-PUSH_SITE = "https://<your-notification-site>"
+PUSH_SITE = "https://<your-worker>.workers.dev"  # the app's own address: the notification page is served by the Worker itself
 VAPID_PUBLIC_KEY = "<public key>"
 ACCESS_TEAM = "<your-access-team-name>"
 ACCESS_AUD = "<application-audience-tag>"

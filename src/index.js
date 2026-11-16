@@ -15,6 +15,11 @@ import { sameSecret } from './secret.js';
 import { processEmail, scan } from './sync.js';
 
 export { sameSecret };
+// The short links of the app (and the paths that notifications open): /cek opens the Cek screen, and so on.
+const SHORT = { tambah: 'add', cek: 'review', ringkasan: 'dashboard', transaksi: 'transactions', pengaturan: 'settings' };
+// The install files, and the page where a phone turns notifications on with its service worker: at the app's own address, because an iPhone only allows web
+// notifications from the installed app itself (a page at another address opens in a small browser where the question is always refused).
+const ASSET_PATHS = /^\/(manifest\.webmanifest|icon-192\.png|icon-512\.png|maskable-512\.png|apple-touch-icon\.png|badge-96\.png|site\.css|sw\.js|notifikasi|notifikasi\.html|notifikasi\.js|notifikasi-state\.js|pasang|pasang\.html|pasang\.js)$/;
 // The schedules (must match wrangler.toml): the minute scan is the default (it also starts the daily jobs); prices every 30 minutes.
 const PRICE_CRON = '*/30 * * * *';
 
@@ -83,12 +88,19 @@ export async function route(request, env) {
     const stamp = new Date().toISOString().slice(0, 10);
     return new Response(backupCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="cashflow-backup-${stamp}.csv"`, 'cache-control': 'no-store' } });
   }
-  // The install files (manifest and icons): the same sign-in applies, the browser sends its cookie with the manifest request.
-  if (request.method === 'GET' && /^\/(manifest\.webmanifest|icon-192\.png|icon-512\.png|maskable-512\.png|apple-touch-icon\.png)$/.test(url.pathname) && env.ASSETS) return env.ASSETS.fetch(request);
+  // The install files and the notification page: the same sign-in applies, the browser sends its cookie with each request (also the service worker's).
+  if (request.method === 'GET' && ASSET_PATHS.test(url.pathname) && env.ASSETS) {
+    const res = await env.ASSETS.fetch(request);
+    if (url.pathname !== '/sw.js') return res;
+    const h = new Headers(res.headers);
+    h.set('cache-control', 'no-cache'); // a new service worker is picked up at the next visit
+    return new Response(res.body, { status: res.status, headers: h });
+  }
   // The page itself (built from the app's own screens by scripts/build-ui.mjs, served as a static asset)
-  if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html') && env.ASSETS) {
+  const shortTab = SHORT[url.pathname.replace(/^\/|\/$/g, '')] || '';
+  if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html' || shortTab) && env.ASSETS) {
     const page = await env.ASSETS.fetch(new Request(new URL('/index.html', request.url)));
-    const tab = /^[a-z]{1,20}$/.test(url.searchParams.get('tab') || '') ? url.searchParams.get('tab') : '';
+    const tab = shortTab || (/^[a-z]{1,20}$/.test(url.searchParams.get('tab') || '') ? url.searchParams.get('tab') : '');
     if (!url.searchParams.has('push') && !tab) return page;
     // ?push= is a phone joining notifications (it comes back from the site's /notifikasi page); ?tab= opens a screen (the site's short links)
     let joined = '';

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notifikasi Cashflow</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0066cc">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/notifikasi.js"></script>
+</head>
+<body>
+<main>
+  <img class="app-icon" src="/icon-192.png" alt="">
+  <h1>Notifikasi di perangkat ini</h1>
+  <p class="lead">Tagihan besok, pengeluaran besar, transaksi baru dan hari gajian, langsung di layar. Pilih jenisnya di Pengaturan aplikasi.</p>
+  <button class="btn primary" id="allow" type="button" hidden>Izinkan notifikasi</button>
+  <p id="msg" role="status" class="msg"></p>
+  <ol id="steps" hidden></ol>
+  <p><a class="link" href="/?tab=settings">Kembali ke aplikasi</a></p>
+</main>
+</body>
+</html>
