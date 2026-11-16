@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TABLES, backupTable, insertsOf, pruneBackups } from '../src/backup.js';
 import { dueJobs, JOBS, runJob } from '../src/daily.js';
+import worker from '../src/index.js';
 import { localD1 } from './d1shim.js';
 
 const schema = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
@@ -74,5 +75,17 @@ describe('the weekly job', () => {
     const b = bucket();
     expect(await runJob(db, { backup: 'config' }, { bucket: b })).toMatch(/backup config: \d+ rows/);
     expect(await runJob(db, { backup: 'prune' }, { bucket: b })).toMatch(/prune/);
+  });
+  it('is carried out by the real queue handler (it once ignored these messages, so no backup was ever written)', async () => {
+    const b = bucket();
+    const sunday = Date.UTC(2026, 10, 15, 20, 5);
+    const bodies = (await dueJobs(db, sunday)).filter((m) => m.backup);
+    const acked = [];
+    const retried = [];
+    const batch = { messages: bodies.map((body) => ({ body, ack: () => acked.push(body), retry: () => retried.push(body) })) };
+    await worker.queue(batch, { DB: db, BACKUP: b, MAIL: { fetch: async () => { throw new Error('no mail in this test'); } }, MAIL_TOKEN: 'x' });
+    expect(retried).toEqual([]);
+    expect(acked).toHaveLength(TABLES.length + 1);
+    expect([...b.files.keys()].map((k) => k.split('/')[2]).sort()).toEqual(TABLES.map((t) => `${t}.sql`).sort());
   });
 });
